@@ -1,0 +1,58 @@
+{
+    "name": "tobiasnagel01/resend-sdk",
+    "description": "Saloon-powered PHP & Laravel SDK for the Resend API.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["resend", "email", "saloon", "laravel", "sdk", "api"],
+    "authors": [
+        {
+            "name": "Tobias Nagel",
+            "email": "tobias.nagel001@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "illuminate/support": "^12.39|^13.0",
+        "saloonphp/laravel-plugin": "^5.0",
+        "saloonphp/saloon": "^4.5"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.24",
+        "orchestra/testbench": "^10.0|^11.0",
+        "pestphp/pest": "^4.0|^5.0",
+        "symfony/yaml": "^7.0|^8.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "TobiasNagel01\\ResendSdk\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "TobiasNagel01\\ResendSdk\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "generate": "@php tools/generate.php",
+        "test": "@php vendor/bin/pest",
+        "format": "@php vendor/bin/pint"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "TobiasNagel01\\ResendSdk\\ResendServiceProvider"
+            ],
+            "aliases": {
+                "Resend": "TobiasNagel01\\ResendSdk\\Facades\\Resend"
+            }
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
