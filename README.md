@@ -203,6 +203,17 @@ Saloon::fake([
 Saloon::assertSent(SendEmailRequest::class);
 ```
 
+## AI agents (Laravel Boost)
+
+The package ships an AI guideline and the `resend-sdk-development` agent skill for [Laravel Boost](https://laravel.com/docs/boost). They teach coding agents such as Claude Code, Cursor or Codex how to use the SDK, including a reference of every method and DTO.
+
+```bash
+composer require laravel/boost --dev
+php artisan boost:install   # select tobiasnagel01/resend-sdk when asked for third-party packages
+```
+
+Run `php artisan boost:update` after updating the package to refresh the guideline and the skill.
+
 ## Development
 
 ```bash
