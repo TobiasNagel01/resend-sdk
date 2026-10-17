@@ -1,7 +1,8 @@
 <?php
 
 /**
- * Generates the Saloon requests, resources, DTOs and endpoint tests from the Resend OpenAPI spec.
+ * Generates the Saloon requests, resources, DTOs, endpoint tests and the Boost skill's method
+ * reference from the Resend OpenAPI spec.
  *
  * Usage: php tools/generate.php [--fetch]
  *
@@ -18,6 +19,7 @@ require __DIR__.'/../vendor/autoload.php';
 const SPEC_URL = 'https://raw.githubusercontent.com/resend/resend-openapi/refs/heads/main/resend.yaml';
 const ROOT_NAMESPACE = 'TobiasNagel01\\ResendSdk';
 const GENERATED_MARKER = '@generated';
+const SKILL_REFERENCES = 'resources/boost/skills/resend-sdk-development/references';
 
 $root = dirname(__DIR__);
 $specPath = $root.'/resources/openapi/resend.yaml';
@@ -77,6 +79,9 @@ final class SdkGenerator
 
         $this->clean(['src/Requests', 'src/Resources', 'src/Data', 'src/Concerns', 'tests/Generated']);
 
+        // The skill references are read by AI agents, so they carry no marker; the directory is owned by the generator instead.
+        array_map(unlink(...), glob("{$this->root}/".SKILL_REFERENCES.'/*.md') ?: []);
+
         foreach ($this->dtos as $dto) {
             $this->write("src/Data/{$dto['name']}.php", $this->renderDto($dto));
         }
@@ -91,6 +96,12 @@ final class SdkGenerator
 
         $this->write('src/Concerns/HasResources.php', $this->renderHasResources());
         $this->write('tests/Generated/EndpointsTest.php', $this->renderEndpointsTest());
+
+        foreach ($this->groupByResource() as $resource) {
+            $this->write(SKILL_REFERENCES.'/'.Str::kebab($resource['accessor']).'.md', $this->renderSkillReference($resource));
+        }
+
+        $this->write(SKILL_REFERENCES.'/data.md', $this->renderSkillDataReference());
 
         $this->format();
 
@@ -798,21 +809,30 @@ final class SdkGenerator
         $lines = [];
 
         foreach ($params as $p) {
-            $doc = $p['doc'];
-
-            if ($p['type'] === 'mixed' && $doc === 'mixed') {
-                $doc = 'mixed';
-            } elseif ($p['omit']) {
-                $doc .= '|null|Omit';
-            } elseif ($this->acceptsNull($p)) {
-                $doc .= str_contains($doc, 'null') ? '' : '|null';
-            }
-
             $description = $this->oneLine($p['description']);
-            $lines[] = rtrim("@param  {$doc}  \${$p['name']}  {$description}");
+            $lines[] = rtrim("@param  {$this->paramDocType($p)}  \${$p['name']}  {$description}");
         }
 
         return $lines;
+    }
+
+    private function paramDocType(array $p): string
+    {
+        $doc = $p['doc'];
+
+        if ($p['type'] === 'mixed' && $doc === 'mixed') {
+            return 'mixed';
+        }
+
+        if ($p['omit']) {
+            return $doc.'|null|Omit';
+        }
+
+        if ($this->acceptsNull($p)) {
+            return $doc.(str_contains($doc, 'null') ? '' : '|null');
+        }
+
+        return $doc;
     }
 
     private function renderResource(array $resource): string
@@ -987,6 +1007,98 @@ final class SdkGenerator
             ]);
 
             PHP;
+    }
+
+    private function renderSkillReference(array $resource): string
+    {
+        $accessor = "Resend::{$resource['accessor']}()";
+        $sections = [];
+
+        foreach ($resource['operations'] as $op) {
+            $lines = ["## `{$op['methodName']}()`", ''];
+            $lines[] = rtrim("`{$op['httpMethod']} {$op['path']}` – {$this->markdownLine($op['summary'])}");
+
+            if ($op['deprecated']) {
+                $lines[] = '';
+                $lines[] = '**Deprecated.**';
+            }
+
+            if ($op['description'] !== null && $this->markdownLine($op['description']) !== $this->markdownLine($op['summary'])) {
+                $lines[] = '';
+                $lines[] = $this->markdownLine($op['description']);
+            }
+
+            $signature = array_map(fn ($p) => $this->renderParam($p), $op['params']);
+            $signature = count($signature) > 3
+                ? "\n    ".implode(",\n    ", $signature).",\n"
+                : implode(', ', $signature);
+
+            array_push($lines, '', '```php', "{$accessor}->{$op['methodName']}({$signature}): Response", '```');
+
+            $dto = $this->responseDtos[$op['id']] ?? null;
+
+            if ($dto !== null) {
+                $lines[] = '';
+                $lines[] = $dto['list']
+                    ? "`\$response->dto()` returns a `ListResponse` of `{$dto['dto']}`."
+                    : "`\$response->dto()` returns {$this->article($dto['dto'])} `{$dto['dto']}`.";
+            }
+
+            if ($op['params'] !== []) {
+                $lines[] = '';
+
+                foreach ($op['params'] as $p) {
+                    $flags = array_filter([
+                        "`{$this->paramDocType($p)}`",
+                        $p['required'] ? 'required' : null,
+                        $p['in'] === 'body' ? null : "{$p['in']} `{$p['key']}`",
+                        $p['in'] === 'body' && $p['key'] !== $p['name'] ? "field `{$p['key']}`" : null,
+                    ]);
+
+                    $lines[] = rtrim("- `\${$p['name']}` (".implode(', ', $flags).') '.$this->markdownLine($p['description']));
+                }
+            }
+
+            $sections[] = implode("\n", $lines);
+        }
+
+        return "# {$accessor}\n\n"
+            ."{$resource['class']} endpoints of the Resend API. Every method sends the request through the connector and returns a `Saloon\\Http\\Response`; "
+            .'failed requests throw `TobiasNagel01\\ResendSdk\\Exceptions\\ResendException`. '
+            ."The matching Saloon request classes live in `TobiasNagel01\\ResendSdk\\Requests\\{$resource['class']}`.\n\n"
+            .implode("\n\n", $sections)."\n";
+    }
+
+    private function renderSkillDataReference(): string
+    {
+        $sections = [];
+
+        foreach ($this->dtos as $dto) {
+            $lines = ["## `{$dto['name']}`", ''];
+
+            foreach ($dto['properties'] as $p) {
+                $doc = $p['doc'];
+
+                if ($p['nullable'] && ! str_contains($doc, 'null') && $doc !== 'mixed') {
+                    $doc .= '|null';
+                }
+
+                $lines[] = rtrim("- `\${$p['name']}` (`{$doc}`, key `{$p['key']}`) ".$this->markdownLine($p['description']));
+            }
+
+            $sections[] = implode("\n", $lines);
+        }
+
+        return "# DTOs\n\n"
+            .'Readonly classes in `TobiasNagel01\\ResendSdk\\Data`, returned by `$response->dto()`. '
+            .'List endpoints return a `TobiasNagel01\\ResendSdk\\Data\\ListResponse` with `data` (list of DTOs), `hasMore` and `nextCursor()`. '
+            ."Every DTO can also be built from a raw API payload with `::fromArray(array \$data)`.\n\n"
+            .implode("\n\n", $sections)."\n";
+    }
+
+    private function markdownLine(?string $text): string
+    {
+        return $text === null ? '' : preg_replace('/\s+/', ' ', trim($text));
     }
 
     private function dummy(array $p): string
